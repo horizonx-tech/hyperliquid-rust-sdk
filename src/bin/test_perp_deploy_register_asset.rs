@@ -35,7 +35,7 @@ async fn main() {
                  Some(PerpDexSchemaInput {
                     full_name: "New Coin".to_string(),
                     collateral_token: 0,  // 0 for USDC
-                    oracle_updater: Some("0xa9Fc75f34c338f658bC0BeAA57f14D675301185f".to_string()),
+                    oracle_updater: Some("0x0000000000000000000000000000000000000000".to_string()),
                 }),
         )
         .await
