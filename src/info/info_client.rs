@@ -90,6 +90,8 @@ pub enum InfoRequest {
     },
     #[serde(rename = "perpDeployAuctionStatus")]
     PerpDeployAuctionStatus,
+    #[serde(rename = "perpDexs")]
+    PerpDexs,
 }
 
 #[derive(Debug)]
@@ -306,6 +308,11 @@ impl InfoClient {
 
     pub async fn query_perp_deploy_auction_status(&self) -> Result<serde_json::Value> {
         let input = InfoRequest::PerpDeployAuctionStatus;
+        self.send_info_request(input).await
+    }
+
+    pub async fn perp_dexs(&self) -> Result<serde_json::Value> {
+        let input = InfoRequest::PerpDexs;
         self.send_info_request(input).await
     }
 }

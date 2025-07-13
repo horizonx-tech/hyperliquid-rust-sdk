@@ -1,8 +1,10 @@
+use std::collections::HashMap;
+
 use ethers::signers::LocalWallet;
 use log::info;
 
 use hyperliquid_rust_sdk::{
-    BaseUrl, ExchangeClient, ExchangeResponseStatus, PerpDexSchemaInput,
+    BaseUrl, ExchangeClient, ExchangeResponseStatus, PerpDexSchemaInput, 
 };
 
 #[tokio::main]
@@ -19,16 +21,22 @@ async fn main() {
 
     // Test 1: Register asset without schema
     info!("Test 1: Registering asset without schema...");
+    let dex = "tstdex";
+    let coin_id = format!("{}:{}", dex, "TESTCOIN");
     match exchange_client
         .perp_deploy_register_asset(
-            "testdex",
+            dex,
             None, // max_gas
-            "TESTCOIN1",
-            6,        // sz_decimals
-            "100.0",  // oracle_px
-            1,        // margin_table_id
+            format!("{}:{}", dex, "TESTCOIN").as_str(),
+            2,        // sz_decimals
+            "10.0",  // oracle_px
+            10,        // margin_table_id
             false,    // only_isolated
-            None,     // schema
+                 Some(PerpDexSchemaInput {
+                    full_name: "New Coin".to_string(),
+                    collateral_token: 0,  // 0 for USDC
+                    oracle_updater: Some("0xa9Fc75f34c338f658bC0BeAA57f14D675301185f".to_string()),
+                }),
         )
         .await
     {
@@ -46,74 +54,17 @@ async fn main() {
         }
     }
 
-    // Test 2: Register asset with schema
-    info!("\nTest 2: Registering asset with schema...");
-    let schema = PerpDexSchemaInput {
-        full_name: "Test Coin 2".to_string(),
-        collateral_token: 0,  // 0 for USDC
-        oracle_updater: Some("0x0000000000000000000000000000000000000000".to_string()),
-    };
-
-    match exchange_client
-        .perp_deploy_register_asset(
-            "testdex",
-            None, // max_gas - let it use current deploy auction price
-            "TESTCOIN2",
-            8,        // sz_decimals
-            "50.0",   // oracle_px
-            1,        // margin_table_id - changed from 0
-            false,    // only_isolated - changed from true
-            Some(schema),
-        )
-        .await
-    {
-        Ok(response) => match response {
-            ExchangeResponseStatus::Ok(data) => {
-                info!("Successfully registered asset with schema: {:?}", data);
-            }
-            ExchangeResponseStatus::Err(e) => {
-                info!("Expected error registering asset with schema: {}", e);
-            }
-        },
-        Err(e) => {
-            info!("Network/parsing error: {:?}", e);
-        }
-    }
-
-    // Test 3: Register asset with minimal schema (no oracle_updater)
-    info!("\nTest 3: Registering asset with minimal schema...");
-    let minimal_schema = PerpDexSchemaInput {
-        full_name: "Test Coin 3".to_string(),
-        collateral_token: 1,  // 1 for USDT
-        oracle_updater: None,
-    };
-
-    match exchange_client
-        .perp_deploy_register_asset(
-            "testdex2",
-            None,
-            "TESTCOIN3",
-            4,        // sz_decimals
-            "25.5",   // oracle_px
-            2,        // margin_table_id
-            false,    // only_isolated
-            Some(minimal_schema),
-        )
-        .await
-    {
-        Ok(response) => match response {
-            ExchangeResponseStatus::Ok(data) => {
-                info!("Successfully registered asset with minimal schema: {:?}", data);
-            }
-            ExchangeResponseStatus::Err(e) => {
-                info!("Expected error registering asset with minimal schema: {}", e);
-            }
-        },
-        Err(e) => {
-            info!("Network/parsing error: {:?}", e);
-        }
-    }
+    let mut oracle_pxs = HashMap::new();
+    oracle_pxs.insert(coin_id, "10.0".to_string());
+    let all_mark_pxs = vec![];
     
-    info!("\nNote: perp_deploy_register_asset typically requires special permissions on testnet.");
-    info!("The implementation has been verified to correctly construct and sign the action.");
+    let oracle_result = exchange_client.perp_deploy_set_oracle(dex, oracle_pxs, all_mark_pxs).await;
+    match oracle_result {
+        Ok(response) => {
+            info!("Successfully set oracle: {:?}", response);
+        }
+        Err(e) => {
+            info!("Error setting oracle: {:?}", e);
+        }
+    }
 }
