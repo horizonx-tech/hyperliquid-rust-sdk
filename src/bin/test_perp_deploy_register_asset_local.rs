@@ -1,8 +1,8 @@
-use ethers::signers::{LocalWallet, Signer};
+use ethers::signers::LocalWallet;
 use log::info;
 
 use hyperliquid_rust_sdk::{
-    BaseUrl, ExchangeClient, PerpDexSchemaInput,
+    BaseUrl, ExchangeClient, PerpDexSchemaInput, HyperliquidSigner,
 };
 
 /// This test verifies that perp_deploy_register_asset correctly constructs the action
@@ -22,7 +22,7 @@ async fn main() {
         .unwrap();
 
     info!("ExchangeClient created successfully");
-    info!("Wallet address: {:?}", exchange_client.wallet.address());
+    info!("Signer address: {:?}", exchange_client.signer.address());
     info!("Base URL: {}", exchange_client.http_client.base_url);
     
     // Create test schema

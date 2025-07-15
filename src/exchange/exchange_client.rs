@@ -1,4 +1,4 @@
-use crate::signature::sign_typed_data;
+use crate::signature::{sign_typed_data, HyperliquidSigner, SignerType};
 use crate::{
     exchange::{
         actions::{
@@ -27,6 +27,7 @@ use log::debug;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use super::cancel::ClientCancelRequestCloid;
 use super::order::{MarketCloseParams, MarketOrderParams};
@@ -42,7 +43,7 @@ pub struct PerpDexSchemaInput {
 #[derive(Debug)]
 pub struct ExchangeClient {
     pub http_client: HttpClient,
-    pub wallet: LocalWallet,
+    pub signer: Arc<SignerType>,
     pub meta: Meta,
     pub vault_address: Option<H160>,
     pub coin_to_asset: HashMap<String, u32>,
@@ -146,9 +147,27 @@ impl Actions {
 }
 
 impl ExchangeClient {
+    fn get_default_wallet(&self) -> Option<&LocalWallet> {
+        match self.signer.as_ref() {
+            SignerType::LocalWallet(wallet) => Some(wallet),
+            _ => None,
+        }
+    }
+    
     pub async fn new(
         client: Option<Client>,
         wallet: LocalWallet,
+        base_url: Option<BaseUrl>,
+        meta: Option<Meta>,
+        vault_address: Option<H160>,
+    ) -> Result<ExchangeClient> {
+        let signer = SignerType::LocalWallet(wallet);
+        Self::new_with_signer(client, signer, base_url, meta, vault_address).await
+    }
+
+    pub async fn new_with_signer(
+        client: Option<Client>,
+        signer: SignerType,
         base_url: Option<BaseUrl>,
         meta: Option<Meta>,
         vault_address: Option<H160>,
@@ -174,7 +193,7 @@ impl ExchangeClient {
             .add_pair_and_name_to_index_map(coin_to_asset);
 
         Ok(ExchangeClient {
-            wallet,
+            signer: Arc::new(signer),
             meta,
             vault_address,
             http_client: HttpClient {
@@ -215,7 +234,7 @@ impl ExchangeClient {
         let timestamp = next_nonce();
         let connection_id = action.hash(timestamp, self.vault_address)?;
         let is_mainnet = self.http_client.is_mainnet();
-        let signature = sign_l1_action(&self.wallet, connection_id, is_mainnet)?;
+        let signature = self.signer.sign_l1_action(connection_id, is_mainnet).await?;
 
         let action_json =
             serde_json::to_value(&action).map_err(|e| Error::JsonParse(e.to_string()))?;
@@ -276,7 +295,7 @@ impl ExchangeClient {
         let timestamp = next_nonce();
         let connection_id = action.hash(timestamp, self.vault_address)?;
         let is_mainnet = self.http_client.is_mainnet();
-        let signature = sign_l1_action(&self.wallet, connection_id, is_mainnet)?;
+        let signature = self.signer.sign_l1_action(connection_id, is_mainnet).await?;
 
         let action_json =
             serde_json::to_value(&action).map_err(|e| Error::JsonParse(e.to_string()))?;
@@ -313,7 +332,8 @@ impl ExchangeClient {
         using_big_blocks: bool,
         wallet: Option<&LocalWallet>,
     ) -> Result<ExchangeResponseStatus> {
-        let wallet = wallet.unwrap_or(&self.wallet);
+        let wallet = wallet.or_else(|| self.get_default_wallet())
+            .ok_or(Error::Wallet("No wallet available for signing".to_string()))?;
 
         let timestamp = next_nonce();
 
@@ -332,7 +352,8 @@ impl ExchangeClient {
         destination: &str,
         wallet: Option<&LocalWallet>,
     ) -> Result<ExchangeResponseStatus> {
-        let wallet = wallet.unwrap_or(&self.wallet);
+        let wallet = wallet.or_else(|| self.get_default_wallet())
+            .ok_or(Error::Wallet("No wallet available for signing".to_string()))?;
         let hyperliquid_chain = if self.http_client.is_mainnet() {
             "Mainnet".to_string()
         } else {
@@ -362,7 +383,8 @@ impl ExchangeClient {
     ) -> Result<ExchangeResponseStatus> {
         // payload expects usdc without decimals
         let usdc = (usdc * 1e6).round() as u64;
-        let wallet = wallet.unwrap_or(&self.wallet);
+        let wallet = wallet.or_else(|| self.get_default_wallet())
+            .ok_or(Error::Wallet("No wallet available for signing".to_string()))?;
 
         let timestamp = next_nonce();
 
@@ -388,7 +410,8 @@ impl ExchangeClient {
             .vault_address
             .or(vault_address)
             .ok_or(Error::VaultAddressNotFound)?;
-        let wallet = wallet.unwrap_or(&self.wallet);
+        let wallet = wallet.or_else(|| self.get_default_wallet())
+            .ok_or(Error::Wallet("No wallet available for signing".to_string()))?;
 
         let timestamp = next_nonce();
 
@@ -459,7 +482,8 @@ impl ExchangeClient {
         params: MarketCloseParams<'_>,
     ) -> Result<ExchangeResponseStatus> {
         let slippage = params.slippage.unwrap_or(0.05); // Default 5% slippage
-        let wallet = params.wallet.unwrap_or(&self.wallet);
+        let wallet = params.wallet.or_else(|| self.get_default_wallet())
+            .ok_or(Error::Wallet("No wallet available for signing".to_string()))?;
 
         let base_url = match self.http_client.base_url.as_str() {
             "https://api.hyperliquid.xyz" => BaseUrl::Mainnet,
@@ -580,7 +604,8 @@ impl ExchangeClient {
         orders: Vec<ClientOrderRequest>,
         wallet: Option<&LocalWallet>,
     ) -> Result<ExchangeResponseStatus> {
-        let wallet = wallet.unwrap_or(&self.wallet);
+        let wallet = wallet.or_else(|| self.get_default_wallet())
+            .ok_or(Error::Wallet("No wallet available for signing".to_string()))?;
         let timestamp = next_nonce();
 
         let mut transformed_orders = Vec::new();
@@ -608,7 +633,8 @@ impl ExchangeClient {
         wallet: Option<&LocalWallet>,
         mut builder: BuilderInfo,
     ) -> Result<ExchangeResponseStatus> {
-        let wallet = wallet.unwrap_or(&self.wallet);
+        let wallet = wallet.or_else(|| self.get_default_wallet())
+            .ok_or(Error::Wallet("No wallet available for signing".to_string()))?;
         let timestamp = next_nonce();
 
         builder.builder = builder.builder.to_lowercase();
@@ -645,7 +671,8 @@ impl ExchangeClient {
         cancels: Vec<ClientCancelRequest>,
         wallet: Option<&LocalWallet>,
     ) -> Result<ExchangeResponseStatus> {
-        let wallet = wallet.unwrap_or(&self.wallet);
+        let wallet = wallet.or_else(|| self.get_default_wallet())
+            .ok_or(Error::Wallet("No wallet available for signing".to_string()))?;
         let timestamp = next_nonce();
 
         let mut transformed_cancels = Vec::new();
@@ -685,7 +712,8 @@ impl ExchangeClient {
         modifies: Vec<ClientModifyRequest>,
         wallet: Option<&LocalWallet>,
     ) -> Result<ExchangeResponseStatus> {
-        let wallet = wallet.unwrap_or(&self.wallet);
+        let wallet = wallet.or_else(|| self.get_default_wallet())
+            .ok_or(Error::Wallet("No wallet available for signing".to_string()))?;
         let timestamp = next_nonce();
 
         let mut transformed_modifies = Vec::new();
@@ -721,7 +749,8 @@ impl ExchangeClient {
         cancels: Vec<ClientCancelRequestCloid>,
         wallet: Option<&LocalWallet>,
     ) -> Result<ExchangeResponseStatus> {
-        let wallet = wallet.unwrap_or(&self.wallet);
+        let wallet = wallet.or_else(|| self.get_default_wallet())
+            .ok_or(Error::Wallet("No wallet available for signing".to_string()))?;
         let timestamp = next_nonce();
 
         let mut transformed_cancels: Vec<CancelRequestCloid> = Vec::new();
@@ -755,7 +784,8 @@ impl ExchangeClient {
         is_cross: bool,
         wallet: Option<&LocalWallet>,
     ) -> Result<ExchangeResponseStatus> {
-        let wallet = wallet.unwrap_or(&self.wallet);
+        let wallet = wallet.or_else(|| self.get_default_wallet())
+            .ok_or(Error::Wallet("No wallet available for signing".to_string()))?;
 
         let timestamp = next_nonce();
 
@@ -779,7 +809,8 @@ impl ExchangeClient {
         coin: &str,
         wallet: Option<&LocalWallet>,
     ) -> Result<ExchangeResponseStatus> {
-        let wallet = wallet.unwrap_or(&self.wallet);
+        let wallet = wallet.or_else(|| self.get_default_wallet())
+            .ok_or(Error::Wallet("No wallet available for signing".to_string()))?;
 
         let amount = (amount * 1_000_000.0).round() as i64;
         let timestamp = next_nonce();
@@ -802,7 +833,8 @@ impl ExchangeClient {
         &self,
         wallet: Option<&LocalWallet>,
     ) -> Result<(String, ExchangeResponseStatus)> {
-        let wallet = wallet.unwrap_or(&self.wallet);
+        let wallet = wallet.or_else(|| self.get_default_wallet())
+            .ok_or(Error::Wallet("No wallet available for signing".to_string()))?;
         let key = H256::from(generate_random_key()?).encode_hex()[2..].to_string();
 
         let address = key
@@ -836,7 +868,8 @@ impl ExchangeClient {
         destination: &str,
         wallet: Option<&LocalWallet>,
     ) -> Result<ExchangeResponseStatus> {
-        let wallet = wallet.unwrap_or(&self.wallet);
+        let wallet = wallet.or_else(|| self.get_default_wallet())
+            .ok_or(Error::Wallet("No wallet available for signing".to_string()))?;
         let hyperliquid_chain = if self.http_client.is_mainnet() {
             "Mainnet".to_string()
         } else {
@@ -865,7 +898,8 @@ impl ExchangeClient {
         token: &str,
         wallet: Option<&LocalWallet>,
     ) -> Result<ExchangeResponseStatus> {
-        let wallet = wallet.unwrap_or(&self.wallet);
+        let wallet = wallet.or_else(|| self.get_default_wallet())
+            .ok_or(Error::Wallet("No wallet available for signing".to_string()))?;
         let hyperliquid_chain = if self.http_client.is_mainnet() {
             "Mainnet".to_string()
         } else {
@@ -893,7 +927,8 @@ impl ExchangeClient {
         code: String,
         wallet: Option<&LocalWallet>,
     ) -> Result<ExchangeResponseStatus> {
-        let wallet = wallet.unwrap_or(&self.wallet);
+        let wallet = wallet.or_else(|| self.get_default_wallet())
+            .ok_or(Error::Wallet("No wallet available for signing".to_string()))?;
         let timestamp = next_nonce();
 
         let action = Actions::SetReferrer(SetReferrer { code });
@@ -912,7 +947,8 @@ impl ExchangeClient {
         max_fee_rate: String,
         wallet: Option<&LocalWallet>,
     ) -> Result<ExchangeResponseStatus> {
-        let wallet = wallet.unwrap_or(&self.wallet);
+        let wallet = wallet.or_else(|| self.get_default_wallet())
+            .ok_or(Error::Wallet("No wallet available for signing".to_string()))?;
         let timestamp = next_nonce();
 
         // Ensure builder address is lowercase

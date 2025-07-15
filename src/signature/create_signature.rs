@@ -29,7 +29,7 @@ pub(crate) fn sign_typed_data<T: Eip712>(payload: &T, wallet: &LocalWallet) -> R
     sign_hash(H256::from(encoded), wallet)
 }
 
-fn sign_hash(hash: H256, wallet: &LocalWallet) -> Result<Signature> {
+pub(crate) fn sign_hash(hash: H256, wallet: &LocalWallet) -> Result<Signature> {
     let (sig, rec_id) = wallet
         .signer()
         .sign_digest_recoverable(Sha256Proxy::from(hash))
